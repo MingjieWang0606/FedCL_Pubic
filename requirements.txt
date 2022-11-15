@@ -1,0 +1,9 @@
+numpy
+scipy
+Pillow
+torchvision
+matplotlib
+tqdm
+h5py
+sklearn
+seaborn
