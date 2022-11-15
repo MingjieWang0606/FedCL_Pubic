@@ -1,9 +1,9 @@
-# Data-Free Knowledge Distillation for Heterogeneous Federated Learning
+# FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity
 
 Research code that accompanies the paper [FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity](https://arxiv.org/pdf/2105.10056.pdf).
 It contains implementation of the following algorithms:
 * **FedCL** (the proposed algorithm)
-* **FedGen** ([paper]([Data-Free Knowledge Distillation for Heterogeneous Federated](https://arxiv.org/pdf/2105.10056.pdf)) [code](https://github.com/zhuangdizhu/FedGen/blob/main/FLAlgorithms/servers/serverpFedGen.py)).
+* **FedGen** ([paper](https://arxiv.org/pdf/2105.10056.pdf)) [code](https://github.com/zhuangdizhu/FedGen/blob/main/FLAlgorithms/servers/serverpFedGen.py)).
 * **FedAvg** ([paper](https://arxiv.org/pdf/1602.05629.pdf) and [code](https://github.com/zhuangdizhu/FedGen/blob/main/FLAlgorithms/servers/serveravg.py)).
 * **FedProx** ([paper](https://arxiv.org/pdf/1812.06127.pdf) and [code](https://github.com/zhuangdizhu/FedGen/blob/main/FLAlgorithms/servers/serverFedProx.py)).
 * **FedDistill** and its extension **FedDistll-FL** ([paper](https://arxiv.org/pdf/2011.02367.pdf) and [code](https://github.com/zhuangdizhu/FedGen/blob/main/FLAlgorithms/servers/serverFedDistill.py)).
