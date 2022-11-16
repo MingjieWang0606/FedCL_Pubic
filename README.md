@@ -1,6 +1,6 @@
 # FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity
 
-Research code that accompanies the paper [FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity](https://arxiv.org/pdf/2105.10056.pdf).
+Research code that accompanies the paper [FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity](http://arxiv.org/abs/2211.07248).
 It contains implementation of the following algorithms:
 * **FedCL** (the proposed algorithm)
 * **FedGen** ([paper](https://arxiv.org/pdf/2105.10056.pdf)) and [code](https://github.com/zhuangdizhu/FedGen/blob/main/FLAlgorithms/servers/serverpFedGen.py)).
