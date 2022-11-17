@@ -57,3 +57,13 @@ For the input attribute **algorithms**, list the name of algorithms and separate
 ```
   python main_plot.py --dataset EMnist-alpha0.1-ratio0.1 --algorithms FedGen --batch_size 32 --local_epochs 50 --num_users 10 --num_glob_iters 200 --plot_legend 1
 ```
+## Citation
+Please cite the following paper if you use this code in your work.
+```
+@article{wang2022fedcl,
+  title={FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity},
+  author={Wang, Mingjie and Guo, Jianxiong and Jia, Weijia},
+  journal={arXiv preprint arXiv:2211.07248},
+  year={2022}
+}
+```
