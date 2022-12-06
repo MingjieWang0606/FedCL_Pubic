@@ -1,5 +1,6 @@
 from FLAlgorithms.users.userpFedGen import UserpFedGen
 from FLAlgorithms.servers.serverbase import Server
+from FLAlgorithms.curriculum.cl_score import CL_User_Score
 from utils.model_utils import read_data, read_user_data, aggregate_user_data, create_generative_model
 import torch
 import torch.nn as nn
@@ -9,9 +10,11 @@ from torchvision.utils import save_image
 import os
 import copy
 import time
+import random
+from sklearn.mixture import GaussianMixture
 MIN_SAMPLES_PER_LABEL=1
 
-class FedGen(Server):
+class FedCL(Server):
     def __init__(self, args, model, seed):
         super().__init__(args, model, seed)
 
@@ -50,7 +53,9 @@ class FedGen(Server):
             lr=self.ensemble_lr, betas=(0.9, 0.999),
             eps=1e-08, weight_decay=0, amsgrad=False)
         self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=self.optimizer, gamma=0.98)
-
+        self.CL_User_Score=CL_User_Score
+        
+        
         #### creating users ####
         self.users = []
         for i in range(total_users):
@@ -67,9 +72,18 @@ class FedGen(Server):
         print("Number of Train/Test samples:", self.total_train_samples, self.total_test_samples)
         print("Data from {} users in total.".format(total_users))
         print("Finished creating FedAvg server.")
-
+# 
     def train(self, args):
         #### pretraining
+        best_auc = -np.inf
+        cl_score_norm_list_1 = []
+        cl_score_norm_list_2 = []
+        
+        CL_Results_Score_list_1 = []
+        CL_Results_Score_list_2 = []
+        gmm_cnn = None
+        _ = None
+        next_stage__ = 0
         for glob_iter in range(self.num_glob_iters):
             print("\n\n-------------Round number: ",glob_iter, " -------------\n\n")
             self.selected_users, self.user_idxs=self.select_users(glob_iter, self.num_users, return_idx=True)
@@ -78,15 +92,59 @@ class FedGen(Server):
             self.evaluate()
             chosen_verbose_user = np.random.randint(0, len(self.users))
             self.timestamp = time.time() # log user-training start time
-            for user_id, user in zip(self.user_idxs, self.selected_users): # allow selected users to train
-                verbose= user_id == chosen_verbose_user
+            
+            loss_list = []
+            # Train model base on local
+            if  glob_iter > 0:
+                cl_score_norm_list_1 = []
+            if len(cl_score_norm_list_2)>1:
+                print(len(np.array(cl_score_norm_list_2).reshape(-1)))
+                _ = np.array(cl_score_norm_list_2).reshape(len(self.selected_users), -1)
+                gmm_cnn=GaussianMixture(n_components=len(self.selected_users), covariance_type="spherical", random_state=0)
+                gmm_cnn.fit(_)
+                
+            if  glob_iter == 0:    
+                Break_local_list = [False for i in range(len(self.user_idxs))]        
+                
+            for i,(user_id, user) in enumerate(zip(self.user_idxs, self.selected_users)):
+                verbose = user_id == chosen_verbose_user
                 # perform regularization using generated samples after the first communication round
-                user.train(
+                
+                CL_Results_Score, loss_, Break_local = user.train(
                     glob_iter,
                     personalized=self.personalized,
                     early_stop=self.early_stop,
                     verbose=verbose and glob_iter > 0,
-                    regularization= glob_iter > 0 )
+                    regularization= glob_iter > 0 ,
+                    run_curriculum = True,
+                    cl_score_norm_list = cl_score_norm_list_2,
+                    server_epoch = glob_iter,
+                    gmm_ = gmm_cnn if gmm_cnn != None else None,
+                    gmm_len = 320,
+                    next_stage = next_stage__
+                
+                )
+                CL_Results_Score_list_1.append([CL_Results_Score.clone().detach().numpy()])
+                
+                cl_score_norm_list_1.extend(CL_Results_Score)
+                    
+                loss_list.append(loss_)
+                if Break_local and glob_iter > 2:
+                        Break_local_list[i] = True
+#             print('*'*20)
+#             print(Break_local_list.count(True))
+#             print('*'*20)
+            if Break_local_list.count(True)>=len(self.user_idxs)*0.8:
+                next_stage__ += 1
+                Break_local_list = [False for i in range(len(self.user_idxs))]     
+                print('*'*20)
+                print(glob_iter)
+                print('*'*20)
+                
+            cl_score_norm_list_2 = cl_score_norm_list_1
+            CL_Results_Score_list_2 = CL_Results_Score_list_1
+            
+            #import pdb; pdb.set_trace()
             curr_timestamp = time.time() # log  user-training end time
             train_time = (curr_timestamp - self.timestamp) / len(self.selected_users)
             self.metrics['user_train_time'].append(train_time)
@@ -98,7 +156,8 @@ class FedGen(Server):
                 self.batch_size,
                 epoches=self.ensemble_epochs // self.n_teacher_iters,
                 latent_layer_idx=self.latent_layer_idx,
-                verbose=True
+                verbose=True,
+                Real_CL_Results = CL_Results_Score_list_2
             )
             self.aggregate_parameters()
             curr_timestamp=time.time()  # log  server-agg end time
@@ -110,7 +169,7 @@ class FedGen(Server):
         self.save_results(args)
         self.save_model()
 
-    def train_generator(self, batch_size, epoches=1, latent_layer_idx=-1, verbose=False):
+    def train_generator(self, batch_size, epoches=1, latent_layer_idx=-1, verbose=False, Real_CL_Results=None,Real_CL_Results_sum=None):
         """
         Learn a generator that find a consensus latent representation z, given a label 'y'.
         :param batch_size:
@@ -123,60 +182,108 @@ class FedGen(Server):
         self.label_weights, self.qualified_labels = self.get_label_weights()
         TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS, STUDENT_LOSS2 = 0, 0, 0, 0
 
-        def update_generator_(n_iters, student_model, TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS):
+        def update_generator_(n_iters, student_model, TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS,Real_CL_Results):
             self.generative_model.train()
             student_model.eval()
             for i in range(n_iters):
                 self.generative_optimizer.zero_grad()
                 y=np.random.choice(self.qualified_labels, batch_size)
                 y_input=torch.LongTensor(y)
+                
                 ## feed to generator
-                gen_result=self.generative_model(y_input, latent_layer_idx=latent_layer_idx, verbose=True)
+                Real_CL_Results = np.squeeze(np.array(Real_CL_Results))
+                gmm=GaussianMixture(n_components=len(self.selected_users), covariance_type="spherical", random_state=0)
+                gmm.fit(Real_CL_Results)
+                gmm_,_ = gmm.sample(1)
+                
+                cl_sample = torch.tensor(gmm_, dtype=torch.float).view(batch_size,1)
+                
+                #torch.tensor([random.uniform(min(Real_CL_Results[random.randint(0,len(self.selected_users)-1)][0]), max(Real_CL_Results[random.randint(0,len(self.selected_users)-1)][0])) for i in range(batch_size)], dtype=torch.float).view(batch_size,1)
+                
+                gen_result=self.generative_model(y_input,cl_sample, latent_layer_idx=latent_layer_idx, verbose=True)
+
                 # get approximation of Z( latent) if latent set to True, X( raw image) otherwise
                 gen_output, eps=gen_result['output'], gen_result['eps']
-                ##### get losses ####
-                # decoded = self.generative_regularizer(gen_output)
+
+                ##### get losses ####x
+                # decoded = self.generative_regularizeen_output)
                 # regularization_loss = beta * self.generative_model.dist_loss(decoded, eps) # map generated z back to eps
-                diversity_loss=self.generative_model.diversity_loss(eps, gen_output)  # encourage different outputs
+                diversity_loss=self.generative_model.diversity_loss(eps, gen_output) 
 
                 ######### get teacher loss ############
                 teacher_loss=0
-                teacher_logit=0
+                # teacher_logit=0
+                fake_cl_score = 0
+                diversity_loss_list = 0
+                
                 for user_idx, user in enumerate(self.selected_users):
+                    gmm_,_ = gmm.sample(1)
+                    cl_sample = torch.tensor(gmm_, dtype=torch.float).view(batch_size,1)
+    #torch.tensor([random.uniform(min(Real_CL_Results[user_idx][0]), max(Real_CL_Results[user_idx][0])) for i in range(batch_size)], dtype=torch.float).view(batch_size,1)   
+                    gen_result=self.generative_model(y_input,cl_sample, latent_layer_idx=latent_layer_idx, verbose=True)
+
+                # get approximation of Z( latent) if latent set to True, X( raw image) otherwise
+                    gen_output, eps=gen_result['output'], gen_result['eps']
                     user.model.eval()
                     weight=self.label_weights[y][:, user_idx].reshape(-1, 1)
                     expand_weight=np.tile(weight, (1, self.unique_labels))
                     user_result_given_gen=user.model(gen_output, start_layer_idx=latent_layer_idx, logit=True)
-                    user_output_logp_=F.log_softmax(user_result_given_gen['logit'], dim=1)
+                    
+                    CL_results = self.CL_User_Score(model_result = user_result_given_gen, 
+                                                     Algorithms = 'SuperLoss_ce', 
+                                                     loss_fun = None,
+                                                     y = y_input,
+                                                     local_epoch = None,
+                                                     schedule = None,
+                                                    
+                                                    )
+ 
+                    user_output_logp_=F.log_softmax(user_result_given_gen['logit'], dim=1).squeeze(-1)
+                    user_output_logp_ = {'logit':user_output_logp_}
+                    fake_cl_loss_ = self.CL_User_Score(model_result = user_output_logp_, 
+                                                     Algorithms = 'SuperLoss_ce', 
+                                                     loss_fun = None,
+                                                     y = y_input,
+                                                     local_epoch = None,
+                                                     schedule = None
+                                                    )
                     teacher_loss_=torch.mean( \
-                        self.generative_model.crossentropy_loss(user_output_logp_, y_input) * \
+                        fake_cl_loss_['Loss']* \
                         torch.tensor(weight, dtype=torch.float32))
-                    teacher_loss+=teacher_loss_
-                    teacher_logit+=user_result_given_gen['logit'] * torch.tensor(expand_weight, dtype=torch.float32)
+                    
+                    cl_loss = torch.mean(torch.nn.MSELoss(reduce=False, size_average=False)(torch.tensor(CL_results['score_list'].clone().detach(), dtype=torch.float),torch.tensor(fake_cl_loss_['score_list'].clone().detach(), dtype=torch.float)))
+                        
+                    teacher_loss += teacher_loss_
+                    fake_cl_score += cl_loss
+                    #teacher_logit+=user_result_given_gen['logit'] * torch.tensor(expand_weight, dtype=torch.float32)
+                
+                teacher_loss = teacher_loss#/len(self.selected_users)
 
-                ######### get student loss ############
-                student_output=student_model(gen_output, start_layer_idx=latent_layer_idx, logit=True)
-                student_loss=F.kl_div(F.log_softmax(student_output['logit'], dim=1), F.softmax(teacher_logit, dim=1))
+                student_loss=1
                 if self.ensemble_beta > 0:
-                    loss=self.ensemble_alpha * teacher_loss - self.ensemble_beta * student_loss + self.ensemble_eta * diversity_loss
+                    loss=self.ensemble_alpha * teacher_loss - self.ensemble_beta * student_loss + self.ensemble_eta * diversity_loss# + fake_cl_score
                 else:
-                    loss=self.ensemble_alpha * teacher_loss + self.ensemble_eta * diversity_loss
+                    loss=self.ensemble_alpha * teacher_loss + self.ensemble_eta * diversity_loss# + fake_cl_score
+                    
                 loss.backward()
                 self.generative_optimizer.step()
                 TEACHER_LOSS += self.ensemble_alpha * teacher_loss#(torch.mean(TEACHER_LOSS.double())).item()
                 STUDENT_LOSS += self.ensemble_beta * student_loss#(torch.mean(student_loss.double())).item()
                 DIVERSITY_LOSS += self.ensemble_eta * diversity_loss#(torch.mean(diversity_loss.double())).item()
-            return TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS
+                
+            return TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS,fake_cl_score#,Triplet_Loss
 
         for i in range(epoches):
-            TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS=update_generator_(
-                self.n_teacher_iters, self.model, TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS)
+            TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS, fake_cl_score=update_generator_(
+                self.n_teacher_iters, self.model, TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS,Real_CL_Results)
 
         TEACHER_LOSS = TEACHER_LOSS.detach().numpy() / (self.n_teacher_iters * epoches)
-        STUDENT_LOSS = STUDENT_LOSS.detach().numpy() / (self.n_teacher_iters * epoches)
+        STUDENT_LOSS = STUDENT_LOSS/ (self.n_teacher_iters * epoches)
         DIVERSITY_LOSS = DIVERSITY_LOSS.detach().numpy() / (self.n_teacher_iters * epoches)
-        info="Generator: Teacher Loss= {:.4f}, Student Loss= {:.4f}, Diversity Loss = {:.4f}, ". \
-            format(TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS)
+        fake_cl_score = fake_cl_score.detach().numpy() / (self.n_teacher_iters * epoches)
+        #Triplet_Loss_ = Triplet_Loss_.detach().numpy() / (self.n_teacher_iters * epoches)
+        info="Generator: Teacher Loss= {:.4f}, Student Loss= {:.4f}, Diversity Loss = {:.4f}, CL Loss = {:.4f},". \
+            format(TEACHER_LOSS, STUDENT_LOSS, DIVERSITY_LOSS,fake_cl_score)
         if verbose:
             print(info)
         self.generative_lr_scheduler.step()

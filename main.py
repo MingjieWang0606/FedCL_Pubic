@@ -6,6 +6,7 @@ from FLAlgorithms.servers.serverFedProx import FedProx
 from FLAlgorithms.servers.serverFedDistill import FedDistill
 from FLAlgorithms.servers.serverpFedGen import FedGen
 from FLAlgorithms.servers.serverpFedEnsemble import FedEnsemble
+from FLAlgorithms.servers.serverpFedCL import FedCL
 from utils.model_utils import create_model
 from utils.plot_utils import *
 import torch
@@ -17,9 +18,11 @@ def create_server_n_user(args, i):
     model = create_model(args.model, args.dataset, args.algorithm)
     if ('FedAvg' in args.algorithm):
         server=FedAvg(args, model, i)
-    elif 'FedGen' in args.algorithm:
+    elif ('FedGen' in args.algorithm):
         server=FedGen(args, model, i)
-    elif    ('FedProx' in args.algorithm):
+    elif ('FedCL' in args.algorithm):
+        server=FedCL(args, model, i)   
+    elif  ('FedProx' in args.algorithm):
         server = FedProx(args, model, i)
     elif ('FedDistill' in args.algorithm):
         server = FedDistill(args, model, i)
