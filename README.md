@@ -61,9 +61,12 @@ For the input attribute **algorithms**, list the name of algorithms and separate
 Please cite the following paper if you use this code in your work.
 ```
 @article{wang2022fedcl,
-  title={FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity},
-  author={Wang, Mingjie and Guo, Jianxiong and Jia, Weijia},
-  journal={arXiv preprint arXiv:2211.07248},
-  year={2022}
+author = {Wang, Mingjie and Guo, Jianxiong and Jia, Weijia},
+title = {FedCL: Federated Multi-Phase Curriculum Learning to Synchronously Correlate User Heterogeneity},
+year = {2023},
+journal = {IEEE Transactions on Artificial Intelligence},
+doi = {10.1109/TAI.2023.3307664},
 }
+@
+
 ```
