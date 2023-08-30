@@ -67,6 +67,4 @@ year = {2023},
 journal = {IEEE Transactions on Artificial Intelligence},
 doi = {10.1109/TAI.2023.3307664},
 }
-@
-
 ```
